@@ -1,0 +1,102 @@
+# Local stack. `docker compose up` starts PostgreSQL only; the `app` profile
+# adds migrate, api and worker, and the `tools` profile adds worker-once.
+x-app: &app
+  image: ${APP_IMAGE:-kotlin-template:local}
+  build:
+    context: .
+  # The JVM writes only to /tmp (Netty's native transport), kept in memory.
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 256
+  environment: &app-environment
+    DATABASE_URL: postgresql://${POSTGRES_USER:-kotlin_template}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgresql:5432/${POSTGRES_DB:-kotlin_template}
+    DATABASE_STATEMENT_TIMEOUT_MS: ${DATABASE_STATEMENT_TIMEOUT_MS:-10000}
+    API_HOST: 0.0.0.0
+    API_PORT: "8000"
+    WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-5000}
+    WORKER_PASS_TIMEOUT_MS: ${WORKER_PASS_TIMEOUT_MS:-60000}
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+
+services:
+  postgresql:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kotlin_template}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_USER: ${POSTGRES_USER:-kotlin_template}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      # Over TCP: during first-boot initialization PostgreSQL listens on its
+      # Unix socket only, so a socket check would pass before migrate can
+      # connect.
+      test:
+        - CMD-SHELL
+        - pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  migrate:
+    <<: *app
+    command: ["kotlintemplate.database.MigrateKt"]
+    restart: "no"
+    profiles: ["app", "tools"]
+    depends_on:
+      postgresql:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    restart: unless-stopped
+    profiles: ["app"]
+    stop_grace_period: 15s
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # Liveness only: a database outage must not restart the API. A JVM starts
+    # for each probe, so the interval is longer than a native binary's.
+    healthcheck:
+      test:
+        - CMD
+        - /usr/bin/java
+        - -XX:TieredStopAtLevel=1
+        - -XX:-UsePerfData
+        - -cp
+        - /app/lib/*
+        - kotlintemplate.apiserver.HealthcheckKt
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  worker:
+    <<: *app
+    command: ["kotlintemplate.workerserver.MainKt"]
+    # The worker exits on any failure; this policy is what restarts it.
+    restart: unless-stopped
+    stop_grace_period: 15s
+    profiles: ["app"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker-once:
+    <<: *app
+    command: ["kotlintemplate.workerserver.MainKt", "once"]
+    restart: "no"
+    profiles: ["tools"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:

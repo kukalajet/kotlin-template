@@ -1,0 +1,23 @@
+# Additions to detekt's defaults (buildUponDefaultConfig).
+
+potential-bugs:
+  # An `else` branch on a sealed type or enum would answer a new error case
+  # without anyone deciding how: name every case instead.
+  ElseCaseInsteadOfExhaustiveWhen:
+    active: true
+
+style:
+  # Early returns for conditions checked in order are the preferred shape;
+  # guard clauses do not count against the limit.
+  ReturnCount:
+    excludeGuardClauses: true
+  ForbiddenMethodCall:
+    active: true
+    methods:
+      - value: 'kotlin.io.println'
+        reason: 'Log with SLF4J: every process writes JSON lines.'
+      - value: 'kotlin.io.print'
+        reason: 'Log with SLF4J: every process writes JSON lines.'
+      - value: 'java.lang.System.getenv'
+        reason: 'Read AppConfig: variables are validated once, in the config module.'
+    excludes: ['**/modules/config/**', '**/src/test/**']

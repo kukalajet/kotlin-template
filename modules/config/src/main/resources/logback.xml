@@ -1,0 +1,27 @@
+<!-- One JSON object per line on standard output. initLogging() sets the root
+     level from LOG_LEVEL. -->
+<configuration>
+  <statusListener class="ch.qos.logback.core.status.NopStatusListener"/>
+
+  <appender name="stdout" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <timeZone>UTC</timeZone>
+      <fieldNames>
+        <timestamp>timestamp</timestamp>
+        <version>[ignore]</version>
+        <levelValue>[ignore]</levelValue>
+        <thread>[ignore]</thread>
+        <logger>logger</logger>
+      </fieldNames>
+    </encoder>
+  </appender>
+
+  <!-- HikariConfig's debug dump names the database host and user. -->
+  <logger name="com.zaxxer.hikari.HikariConfig" level="INFO"/>
+  <!-- jOOQ logs SQL text at debug; execute logging is also off in the adapter. -->
+  <logger name="org.jooq" level="INFO"/>
+
+  <root level="INFO">
+    <appender-ref ref="stdout"/>
+  </root>
+</configuration>
